@@ -49,6 +49,7 @@ internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpCli
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning($"GET {requestPath} {response.StatusCode}");
+            HttpContext.Response.StatusCode = (int)response.StatusCode;
             await SendStreamAsync(await response.Content.ReadAsStreamAsync(ct),
                 contentType: response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
                 cancellation: ct);
