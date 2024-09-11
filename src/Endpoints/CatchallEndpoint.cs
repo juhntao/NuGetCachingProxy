@@ -1,7 +1,3 @@
-using System.Net.Http.Headers;
-
-using FastEndpoints;
-
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.Extensions.Options;
 
@@ -14,7 +10,7 @@ namespace NuGetCachingProxy.Endpoints;
 ///     URL with this proxy server URL so the client actually fetches cached resources from us instead of directly going to
 ///     the upstream.
 /// </summary>
-internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpClientFactory clientFactory)
+internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpClientFactory clientFactory, ILogger<CatchallEndpoint> logger)
     : EndpointWithoutRequest
 {
     public override void Configure()
@@ -25,40 +21,52 @@ internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpCli
 
     public override async Task HandleAsync(CancellationToken ct)
     {
+        if(HttpContext.Request.Method != "GET")
+        {
+            HttpContext.Response.StatusCode = 400;
+            return;
+        }
+
         string upstreamUrl = new Uri(options.Value.UpstreamUrl).GetLeftPart(UriPartial.Authority);
 
         Uri requestUrl = new(HttpContext.Request.GetDisplayUrl());
         string backendUrl = requestUrl.GetLeftPart(UriPartial.Authority);
-        string requestPath = requestUrl.AbsolutePath;
-
+        string requestPath = requestUrl.PathAndQuery;
+        logger.LogInformation($"{HttpContext.Request.Method} {requestPath}");
         HttpClient client = clientFactory.CreateClient("UpstreamNuGetServer");
 
-        HttpResponseMessage response = await client.GetAsync(requestPath, ct);
+        var requestMessage = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, requestPath);
+        foreach(var h in HttpContext.Request.Headers)
+        {
+            if (h.Key.StartsWith("X-", StringComparison.OrdinalIgnoreCase) && !client.DefaultRequestHeaders.Contains(h.Key) && !requestMessage.Headers.Contains(h.Key))
+            {
+                requestMessage.Headers.TryAddWithoutValidation(h.Key, h.Value.ToString());
+            }
+        }
+
+        HttpResponseMessage response = await client.SendAsync(requestMessage, ct);
 
         // pass error to client
         if (!response.IsSuccessStatusCode)
         {
-            MediaTypeHeaderValue? contentType = response.Content.Headers.ContentType;
             await SendStreamAsync(await response.Content.ReadAsStreamAsync(ct),
-                contentType: contentType?.ToString() ?? "application/octet-stream",
+                contentType: response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
                 cancellation: ct);
             return;
         }
 
-        // pass whatever content to client
-        if (!Equals(response.Content.Headers.ContentType, MediaTypeHeaderValue.Parse("application/json")))
+        if ("application/json".Equals(response.Content.Headers.ContentType?.MediaType, StringComparison.OrdinalIgnoreCase) || "application/xml".Equals(response.Content.Headers.ContentType?.MediaType, StringComparison.OrdinalIgnoreCase))
         {
-            MediaTypeHeaderValue? contentType = response.Content.Headers.ContentType;
-            await SendStreamAsync(await response.Content.ReadAsStreamAsync(ct),
-                contentType: contentType?.ToString() ?? "application/octet-stream",
-                cancellation: ct);
+            string body = await response.Content.ReadAsStringAsync(ct);
+
+            body = body.Replace(upstreamUrl, backendUrl);
+
+            await SendStringAsync(body, contentType: response.Content.Headers.ContentType.ToString(), cancellation: ct);
             return;
         }
 
-        string jsonBody = await response.Content.ReadAsStringAsync(ct);
-
-        jsonBody = jsonBody.Replace(upstreamUrl, backendUrl);
-
-        await SendStringAsync(jsonBody, contentType: "application/json", cancellation: ct);
+        await SendStreamAsync(await response.Content.ReadAsStreamAsync(ct),
+            contentType: response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
+            cancellation: ct);
     }
 }

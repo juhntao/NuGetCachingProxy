@@ -41,6 +41,12 @@ builder.Services.AddHttpClient("UpstreamNuGetServer",
                 Assembly.GetEntryAssembly()?.GetName().Version!.ToString()));
 
             client.BaseAddress = new Uri(serviceConfig.UpstreamUrl);
+            if (serviceConfig.Credential.ContainsKey("UserName") && serviceConfig.Credential.ContainsKey("Password"))
+            {
+                var userName = serviceConfig.Credential["UserName"];
+                var password = serviceConfig.Credential["Password"];
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(System.Text.Encoding.ASCII.GetBytes($"{userName}:{password}")));
+            }
         })
     .ConfigurePrimaryHttpMessageHandler(_ => new HttpClientHandler
     {

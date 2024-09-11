@@ -19,4 +19,5 @@ public sealed class ServiceConfig
     ///     The default upstream.
     /// </summary>
     public string UpstreamUrl { get; set; } = "https://api.nuget.org/";
+    public Dictionary<string, string> Credential { get; set; } = new Dictionary<string, string>();
 }
