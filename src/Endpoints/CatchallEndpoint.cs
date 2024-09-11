@@ -32,7 +32,6 @@ internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpCli
         Uri requestUrl = new(HttpContext.Request.GetDisplayUrl());
         string backendUrl = requestUrl.GetLeftPart(UriPartial.Authority);
         string requestPath = requestUrl.PathAndQuery;
-        logger.LogInformation($"{HttpContext.Request.Method} {requestPath}");
         HttpClient client = clientFactory.CreateClient("UpstreamNuGetServer");
 
         var requestMessage = new HttpRequestMessage(System.Net.Http.HttpMethod.Get, requestPath);
@@ -49,6 +48,7 @@ internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpCli
         // pass error to client
         if (!response.IsSuccessStatusCode)
         {
+            logger.LogWarning($"GET {requestPath} {response.StatusCode}");
             await SendStreamAsync(await response.Content.ReadAsStreamAsync(ct),
                 contentType: response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
                 cancellation: ct);
@@ -68,5 +68,7 @@ internal sealed class CatchallEndpoint(IOptions<ServiceConfig> options, IHttpCli
         await SendStreamAsync(await response.Content.ReadAsStreamAsync(ct),
             contentType: response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream",
             cancellation: ct);
+
+        logger.LogInformation($"{HttpContext.Request.Method} {requestPath}");
     }
 }
